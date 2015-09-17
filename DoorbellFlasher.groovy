@@ -1,137 +1,90 @@
 /**
- *  Good Night
+ *  Doorbell
  *
- *  Author: dpvorster
- *  Date: 2014-12-27
+ *  Copyright 2014 Daniel Vorster
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ *  in compliance with the License. You may obtain a copy of the License at:
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+ *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+ *  for the specific language governing permissions and limitations under the License.
+ *
  */
 definition(
-    name: "Good Night",
-    namespace: "smartthings",
-    author: "SmartThings",
-    description: "Changes mode when no power is detected on a switch after a specific time at night.",
-    category: "Convenience",
-    iconUrl: "https://s3.amazonaws.com/smartapp-icons/ModeMagic/good-night.png",
-    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/ModeMagic/good-night@2x.png"
-)
+    name: "Doorbell Flasher",
+    namespace: "dpvorster",
+    author: "Daniel Vorster",
+    description: "Detects a doorbell and flashes a light",
+    category: "My Apps",
+    iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
+    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
+    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png")
+
 
 preferences {
-	section("When there is no power consumed by this device") {
-		input "switch1", "capability.powerMeter", title: "Where?"
+
+	section("When the doorbell rings...") {
+		input "contact", "capability.button", title: "Button?"
 	}
-	section("After this time of day") {
-		input "timeOfDay", "time", title: "Time?"
+    section("Then flash 3 times...") {
+		input "switch1", "capability.switch", title: "This light?"
 	}
-    section("Only when mode is") {
-    	input "modes", "mode", title: "Modes?", multiple: true, required: false
-    }
 }
 
-def installed() 
-{
-	initialize()
-}
-
-def updated() 
-{
-	initialize()
-}
-
-def initialize()
-{   
-	subscribe(location)
-    changedLocationMode (location.mode)
-}
-   
-def changedLocationMode(evt)
-{
-	log.debug "MODE TRIGGERED: changedLocationMode: $evt"
-    if (correctMode())
-    {
-    	initializeSchedule()
-    }
-    else
-    {
-    	unschedule()
-    }
-}
+def installed() {
+	log.debug "Installed with settings: ${settings}"
     
-def initializeSchedule()
-{
-	if (now() < timeToday(timeOfDay, location.timeZone).time) 
-    {
-    	resetSchedule()
+    state.lastActivated = 0L
+    subscribe (contact, "button", "eventHandler")
+}
+
+def updated() {
+	log.debug "Updated with settings: ${settings}"
+
+	unsubscribe()
+    subscribe (contact, "button", "eventHandler")
+}
+      
+def eventHandler(evt) {
+
+	log.debug "Event is $evt.value"
+	if (evt.value != "pushed") {
+    	return
     }
-    else 
-    {
-    	setSchedule()
-    }
-}
 
-// Start polling more frequently
-private setSchedule()
-{
-	unschedule()
-    state.wasOn = (switch1.currentValue('power') > 5)
-    log.debug "Setting schedule for short intervals"
-	schedule("0 0/1 * * * ?", 'scheduleCheck')
-}
-
-// Reset schedule for the next day
-private resetSchedule()
-{
-	unschedule()
-    schedule(timeOfDay, 'setSchedule')
-    state.wasOn = false
-    log.debug "Setting schedule to run at $timeOfDay"
-}
-
-def scheduleCheck()
-{
-	log.debug "scheduleCheck, wasOn=$state.wasOn"
+	if (state.lastActivated) {
     
-    // Check if switch is on
-    if (! state.wasOn) {
-    	state.wasOn = (switch1.currentValue('power') > 5)
+    	if (now() - state.lastActivated < 8000) {
+        	return
+        }
     }
-	
-	if (correctTime() && correctMode() && state.wasOn)
-    {
-		if (isPowerOff())
-        {
-			takeActions()
-		}
-	}
-} 
+    
+    log.debug "Flashing light"
+    state.lastActivated = now();
+    
+    def first = (switch1.currentSwitch == "on" ? "off" : "on");
+    def second = (first == "off" ? "on" : "off");
+    	
+    toggleSwitch (switch1, first,  0)
+    toggleSwitch (switch1, second, 1000)
+    toggleSwitch (switch1, first,  2000)
+    toggleSwitch (switch1, second, 3000)
+    toggleSwitch (switch1, first,  4000)
+    toggleSwitch (switch1, second, 5000)
+    // Repeat to make sure the light ends in the right state
+    toggleSwitch (switch1, second, 6000)
 
-private takeActions() 
-{
-    log.debug "Executing good night"
-	location.helloHome.execute("Good Night!")
-    resetSchedule()
 }
 
-private correctTime() 
-{
-	def t0 = now()
-	def startTime = timeToday(timeOfDay, location.timeZone)
-	if (t0 >= startTime.time) {
-		true
-	} else {
-		log.debug "The current time of day ($t0), is not in the correct time window ($startTime):  doing nothing"
-		false
-	}
-}
+def toggleSwitch(s, cmd, waitFor) {
 
-private correctMode()
-{
-	def result = !modes || modes.contains(location.mode)
-	log.debug "correctMode = $result"
-	result
-}
-
-private isPowerOff() 
-{
-	def power = switch1.currentValue('power')
-	log.debug "Power is $power"
-	power < 5
+	if (cmd == "on") {
+    	s.on (delay: waitFor)
+    }
+    else {
+    	s.off (delay: waitFor)
+    }
 }
